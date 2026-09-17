@@ -52,13 +52,16 @@ def build_prospect_profile(prospect_id: str) -> dict:
     "Assemble a full prospect profile (engagement history, account details, tech stack) and store it. Returns the profile and a found flag."
     existing = data_service.get_profile_from_db(prospect_id)["prospect_profile"]
     if existing is not None:
-        return {"prospect_profile": existing, "found": True}
+        sanitized = data_service.public_prospect_fields(existing)
+        data_service.save_profile_to_db(prospect_id, sanitized)
+        return {"prospect_profile": sanitized, "found": True}
     rec = data_service.get_prospect_record(prospect_id)
     if rec is None:
         return {"prospect_profile": None, "found": False}
+    public_record = data_service.public_prospect_fields(rec)
     built = {
         "prospect_id": prospect_id,
-        **rec,
+        **public_record,
         "engagement_history": data_service.fetch_engagement_history(prospect_id),
         "account_details": data_service.fetch_account_details(prospect_id),
         "tech_stack": data_service.fetch_tech_stack(prospect_id),
@@ -124,16 +127,19 @@ def score_prospect(prospect_profile: dict, offering: dict | None = None) -> dict
 
 @tool
 def get_prospect(prospect_id: str) -> dict:
-    "Look up a prospect's contact details by prospect_id (e.g. 'LEAD-12853'). Returns the prospect's name and email plus a found flag."
+    "Look up a prospect's public contact details by prospect_id (e.g. 'LEAD-12853'). Returns an allowlisted contact and a found flag."
     record = data_service.get_prospect_record(prospect_id)
     if record is None:
         return {"prospect": None, "found": False}
-    # Carry the contact fields through, dropping the bulky enrichment blobs the
-    # caller can pull from build_prospect_profile instead.
+    public_record = data_service.public_prospect_fields(record)
+    allowed_fields = (
+        "prospect_id", "name", "email", "annual_revenue",
+        "enrichment_source", "disqualified",
+    )
     contact = {
-        "prospect_id": prospect_id,
-        **{k: v for k, v in record.items()
-           if k not in ("engagement_history", "account_details", "tech_stack")},
+        field: prospect_id if field == "prospect_id" else public_record[field]
+        for field in allowed_fields
+        if field == "prospect_id" or field in public_record
     }
     return {"prospect": contact, "found": True}
 
